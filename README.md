@@ -41,4 +41,4 @@ Any program that you want to be able to run in the simulator must be built with 
 
 ## Libraries
 
-This works with the I2C library
+This works with the I2C library and GPIO library, and there is a simulation of the LCD and the Keypad hardware which builds upon these libraries. These implemetations are not complete.
