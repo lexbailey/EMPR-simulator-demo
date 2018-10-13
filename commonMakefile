@@ -1,0 +1,78 @@
+PKG=/opt/york/cs/net/bin/
+
+ARCH=arm-none-eabi
+CC=$(ARCH)-gcc
+OBJDUMP=$(ARCH)-objdump
+OBJCOPY=$(ARCH)-objcopy
+COMMON_LIBS=../common
+
+SOURCERY=$(PKG)/sourcery-g++-lite-arm-eabi-2010.09.51-i686-1
+GNU_VERSION=4.5.0
+THUMB2GNULIB=$(SOURCERY)/$(ARCH)/lib/$(GNU_VERSION)/thumb2
+THUMB2GNULIB2=$(SOURCERY)/$(ARCH)/lib/thumb2
+
+# "Cortex Microcontroller Software Interface Standard" Startup files
+CMSIS=$(PKG)../lpc1700-cmsis-lite-2011.01.26-i686-1
+CMSISINCLUDES=-I$(CMSIS)/include
+CMSISFL=$(CMSIS)/lib/core_cm3.o \
+	$(CMSIS)/lib/system_LPC17xx.o \
+	$(CMSIS)/lib/startup_LPC17xx.o
+LDSCRIPT = $(CMSIS)/lib/ldscript_rom_gnu.ld
+
+CFLAGS=-mcpu=cortex-m3  -mthumb  -Wall  -O2  -mapcs-frame  -D__thumb2__=1 \
+  -msoft-float  -gdwarf-2  -mno-sched-prolog  -fno-hosted  -mtune=cortex-m3 \
+  -march=armv7-m  -mfix-cortex-m3-ldrd   -ffunction-sections  -fdata-sections \
+          -D__RAM_MODE__=0 $(CMSISINCLUDES) -I. --std=gnu99 -I$(COMMON_LIBS)
+
+LDFLAGS=$(CMSISFL) -static -mcpu=cortex-m3 -mthumb -mthumb-interwork \
+	   -Wl,--start-group -L$(THUMB2GNULIB) -L$(THUMB2GNULIB2) \
+           -lc -lg -lstdc++ -lsupc++  -lgcc -lm  -Wl,--end-group \
+	   -Xlinker -Map -Xlinker lpc1700.map -Xlinker -T $(LDSCRIPT)
+
+LDFLAGS+=-L$(CMSIS)/lib -lDriversLPC17xxgnu
+
+TEST_INC=../test_include
+
+MOCK_OBJ_NAMES=pinsel gpio uart i2c timer
+MOCK_OBJS=$(foreach name, $(MOCK_OBJ_NAMES), $(TEST_INC)/test-lpc17xx_$(name).o)
+
+test-%.o: CC=gcc
+test-%.o: CFLAGS=-DTESTING -I$(TEST_INC) -I$(COMMON_LIBS) -ggdb
+
+test-%.o: %.c
+	$(CC) -c $(CPPFLAGS) $(CFLAGS) $< -o $@
+
+all: $(PROGNAME)
+
+$(PROGNAME): $(OBJ)
+	$(CC) -o $@ $^ $(LDFLAGS)
+	$(OBJCOPY) -I elf32-little -O binary $@ $@.bin
+
+TEST_OBJS=$(foreach f,$(OBJ), $(dir $f)$(addprefix test-, $(notdir $f)))
+TEST_C_FILES=$(foreach f,$(OBJ), $(dir $f)$(addsuffix .c, $(basename $(notdir $f))))
+
+test-$(PROGNAME): LDFLAGS=
+test-$(PROGNAME): CC=gcc
+test-$(PROGNAME): CFLAGS=-DTESTING -I$(TEST_INC) -I$(COMMON_LIBS) -ggdb -Wall
+test-$(PROGNAME): $(TEST_OBJS) $(MOCK_OBJS) $(TEST_INC)/LPC17xx.o
+	$(CC) -o $@ $^ $(LDFLAGS)
+
+scan-$(PROGNAME):
+	scan-build -enable-checker 'deadcode' -enable-checker 'security' make -B test-$(PROGNAME)
+	
+clean:
+	rm -f *.swp *.o **/*.o  *.log
+	rm -f *.d */*.d *.srec */*.a *.map
+	rm -f *.elf *.wrn *.bin log *.hex *.dis
+
+# install software to board, remember to sync the file systems
+install: $(PROGNAME)
+	@echo "Copying " $(PROGNAME) "to the MBED file system"
+	cp $(PROGNAME).bin /media/$(USER)/MBED &
+	sync
+	@echo "Now press the reset button on all MBED file systems"
+
+%.dis: %.o
+	$(OBJDUMP) -d $< > $@
+
+.PHONY: install clean build
